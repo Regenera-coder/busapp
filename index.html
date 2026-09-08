@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>My Bus</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0b5fff">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #1a1d24;
+    --accent: #0b5fff;
+    --text: #f2f3f5;
+    --muted: #9aa0a8;
+    --good: #2ecc71;
+    --warn: #f39c12;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #222530;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  nav.tabs {
+    display: flex;
+    border-bottom: 1px solid #222530;
+    flex-shrink: 0;
+  }
+  nav.tabs button {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 12px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  nav.tabs button.active {
+    color: var(--text);
+    border-bottom: 2px solid var(--accent);
+  }
+  .screen { display: none; flex-direction: column; flex: 1; min-height: 0; }
+  .screen.active { display: flex; }
+
+  /* --- Directions screen --- */
+  .search-panel {
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+    background: var(--bg);
+    z-index: 5;
+  }
+  .input-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    background: var(--card);
+    border-radius: 10px;
+    padding: 0 12px;
+  }
+  .input-row .dot { font-size: 14px; margin-right: 8px; }
+  .input-row input {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text);
+    padding: 12px 0;
+    font-size: 14px;
+    outline: none;
+  }
+  .suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--card);
+    border-radius: 10px;
+    margin-top: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 20;
+    display: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .suggestions.open { display: block; }
+  .suggestion-item {
+    padding: 10px 14px;
+    font-size: 13px;
+    border-bottom: 1px solid #262a34;
+  }
+  .suggestion-item .s-name { font-weight: 600; }
+  .suggestion-item .s-addr { color: var(--muted); font-size: 12px; }
+
+  #goBtn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  #map { flex: 1; min-height: 200px; background: #1a1d24; }
+  #itineraryPanel {
+    max-height: 40%;
+    overflow-y: auto;
+    padding: 12px 16px;
+    flex-shrink: 0;
+    border-top: 1px solid #222530;
+  }
+  .itin-summary { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+  .leg-row {
+    display: flex;
+    gap: 10px;
+    padding: 8px 0;
+    border-top: 1px solid #262a34;
+    font-size: 14px;
+  }
+  .leg-icon { width: 22px; text-align: center; }
+  .leg-desc .leg-main { font-weight: 600; }
+  .leg-desc .leg-sub { color: var(--muted); font-size: 12px; }
+
+  /* --- Nearby screen (reused from earlier build) --- */
+  #status { padding: 10px 16px; color: var(--muted); font-size: 13px; }
+  #stopList { padding: 0 16px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+  .stop-card { background: var(--card); border-radius: 12px; padding: 14px 16px; cursor: pointer; }
+  .stop-top { display: flex; justify-content: space-between; align-items: baseline; }
+  .stop-name { font-weight: 600; font-size: 15px; }
+  .stop-dist { color: var(--muted); font-size: 13px; }
+  .stop-code { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .arrivals { margin-top: 10px; display: none; flex-direction: column; gap: 6px; }
+  .arrivals.open { display: flex; }
+  .service-row { display: flex; justify-content: space-between; font-size: 14px; padding: 4px 0; border-top: 1px solid #262a34; }
+  .service-no { font-weight: 600; }
+  .eta { color: var(--good); font-weight: 600; }
+  .eta.warn { color: var(--warn); }
+  .spinner { text-align: center; color: var(--muted); padding: 20px; font-size: 14px; }
+  #refreshBtn {
+    background: var(--accent); color: white; border: none;
+    border-radius: 8px; padding: 8px 14px; font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🚌 My Bus</h1>
+</header>
+
+<nav class="tabs">
+  <button id="tabDirBtn" class="active">Directions</button>
+  <button id="tabNearBtn">Nearby</button>
+</nav>
+
+<!-- DIRECTIONS SCREEN -->
+<div id="screenDirections" class="screen active">
+  <div class="search-panel">
+    <div class="input-row">
+      <span class="dot">🟢</span>
+      <input id="fromInput" placeholder="Current location" />
+      <div class="suggestions" id="fromSuggestions"></div>
+    </div>
+    <div class="input-row">
+      <span class="dot">🔴</span>
+      <input id="toInput" placeholder="Where to?" />
+      <div class="suggestions" id="toSuggestions"></div>
+    </div>
+    <button id="goBtn">Get Directions</button>
+  </div>
+  <div id="map"></div>
+  <div id="itineraryPanel"></div>
+</div>
+
+<!-- NEARBY SCREEN -->
+<div id="screenNearby" class="screen">
+  <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 16px 0;">
+    <div id="status">Getting your location...</div>
+    <button id="refreshBtn">Refresh</button>
+  </div>
+  <div id="stopList"></div>
+</div>
+
+<script>
+// ---- CONFIG: paste your deployed Cloudflare Worker URL here ----
+const WORKER_URL = "https://busapp-proxy.marcuschang10.workers.dev";
+// ------------------------------------------------------------------
+
+/* ===================== TAB SWITCHING ===================== */
+const tabDirBtn = document.getElementById("tabDirBtn");
+const tabNearBtn = document.getElementById("tabNearBtn");
+const screenDirections = document.getElementById("screenDirections");
+const screenNearby = document.getElementById("screenNearby");
+
+tabDirBtn.addEventListener("click", () => switchTab("directions"));
+tabNearBtn.addEventListener("click", () => switchTab("nearby"));
+
+function switchTab(tab) {
+  const isDir = tab === "directions";
+  tabDirBtn.classList.toggle("active", isDir);
+  tabNearBtn.classList.toggle("active", !isDir);
+  screenDirections.classList.toggle("active", isDir);
+  screenNearby.classList.toggle("active", !isDir);
+  if (isDir) setTimeout(() => map && map.invalidateSize(), 100);
+  if (!isDir && allStops.length === 0) initNearby();
+}
+
+/* ===================== SHARED LOCATION HELPER ===================== */
+function getLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Geolocation not supported on this device"));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+    });
+  });
+}
+
+/* ===================== DIRECTIONS SCREEN ===================== */
+let map, routeLayer, markerLayer;
+let fromCoords = null; // {lat, lng, name} — null means "use current location"
+let toCoords = null;
+
+function initMap() {
+  if (map) return;
+  map = L.map("map").setView([1.3521, 103.8198], 12); // Singapore center
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors",
+    maxZoom: 19,
+  }).addTo(map);
+  routeLayer = L.layerGroup().addTo(map);
+  markerLayer = L.layerGroup().addTo(map);
+}
+initMap();
+
+function setupSearchInput(inputEl, suggestionsEl, onPick) {
+  let debounceTimer;
+  inputEl.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    const q = inputEl.value.trim();
+    if (q.length < 2) {
+      suggestionsEl.classList.remove("open");
+      return;
+    }
+    debounceTimer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${WORKER_URL}/search?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        renderSuggestions(data.results || []);
+      } catch (e) {
+        suggestionsEl.classList.remove("open");
+      }
+    }, 300);
+  });
+
+  function renderSuggestions(results) {
+    if (results.length === 0) {
+      suggestionsEl.classList.remove("open");
+      return;
+    }
+    suggestionsEl.innerHTML = results
+      .slice(0, 8)
+      .map(
+        (r, i) => `
+        <div class="suggestion-item" data-idx="${i}">
+          <div class="s-name">${r.name}</div>
+          <div class="s-addr">${r.address || ""}</div>
+        </div>`
+      )
+      .join("");
+    suggestionsEl.classList.add("open");
+
+    [...suggestionsEl.querySelectorAll(".suggestion-item")].forEach((el) => {
+      el.addEventListener("click", () => {
+        const r = results[Number(el.dataset.idx)];
+        inputEl.value = r.name;
+        suggestionsEl.classList.remove("open");
+        onPick(r);
+      });
+    });
+  }
+}
+
+setupSearchInput(document.getElementById("fromInput"), document.getElementById("fromSuggestions"), (r) => {
+  fromCoords = r;
+});
+setupSearchInput(document.getElementById("toInput"), document.getElementById("toSuggestions"), (r) => {
+  toCoords = r;
+});
+
+document.getElementById("goBtn").addEventListener("click", getDirections);
+
+async function getDirections() {
+  const itinPanel = document.getElementById("itineraryPanel");
+  itinPanel.innerHTML = `<div class="spinner">Finding route...</div>`;
+
+  try {
+    let start = fromCoords;
+    if (!start) {
+      const pos = await getLocation();
+      start = { lat: pos.coords.latitude, lng: pos.coords.longitude, name: "Current location" };
+    }
+
+    if (!toCoords) {
+      itinPanel.innerHTML = `<div class="spinner">Please pick a destination from the search suggestions</div>`;
+      return;
+    }
+
+    const params = new URLSearchParams({
+      startLat: start.lat,
+      startLng: start.lng,
+      endLat: toCoords.lat,
+      endLng: toCoords.lng,
+    });
+
+    const res = await fetch(`${WORKER_URL}/route?${params.toString()}`);
+    const data = await res.json();
+
+    const itineraries = data?.plan?.itineraries || [];
+    if (itineraries.length === 0) {
+      itinPanel.innerHTML = `<div class="spinner">No route found. Try a different start/destination.</div>`;
+      return;
+    }
+
+    renderItinerary(itineraries[0], start, toCoords);
+  } catch (err) {
+    itinPanel.innerHTML = `<div class="spinner">Error: ${err.message}</div>`;
+  }
+}
+
+function renderItinerary(itin, start, end) {
+  const itinPanel = document.getElementById("itineraryPanel");
+  routeLayer.clearLayers();
+  markerLayer.clearLayers();
+
+  const totalMinutes = itin.duration ? Math.round(itin.duration / 60) : null;
+  const walkMeters = itin.walkDistance ? Math.round(itin.walkDistance) : null;
+
+  let summaryText = totalMinutes ? `${totalMinutes} min` : "Route found";
+  if (walkMeters) summaryText += ` · ${walkMeters}m walking`;
+  if (itin.transfers !== undefined) summaryText += ` · ${itin.transfers} transfer(s)`;
+
+  const legs = itin.legs || [];
+  const legsHtml = legs
+    .map((leg) => describeLeg(leg))
+    .join("");
+
+  itinPanel.innerHTML = `<div class="itin-summary">${summaryText}</div>${legsHtml}`;
+
+  // Draw markers
+  L.marker([start.lat, start.lng]).addTo(markerLayer).bindPopup("Start");
+  L.marker([end.lat, end.lng]).addTo(markerLayer).bindPopup("Destination");
+
+  // Draw each leg's geometry if present
+  const allPoints = [];
+  legs.forEach((leg) => {
+    const points = decodeLegGeometry(leg);
+    if (points.length > 0) {
+      const color = leg.mode === "WALK" ? "#9aa0a8" : "#0b5fff";
+      const dashArray = leg.mode === "WALK" ? "6,6" : null;
+      L.polyline(points, { color, weight: 4, dashArray }).addTo(routeLayer);
+      allPoints.push(...points);
+    }
+  });
+
+  if (allPoints.length > 0) {
+    map.fitBounds(L.latLngBounds(allPoints), { padding: [30, 30] });
+  }
+}
+
+function describeLeg(leg) {
+  const mode = (leg.mode || "").toUpperCase();
+  const fromName = leg.from?.name || "start";
+  const toName = leg.to?.name || "destination";
+  const routeName = leg.route || leg.routeShortName || leg.routeId || "";
+  const durationMin = leg.duration ? Math.round(leg.duration / 60) : null;
+  const distanceM = leg.distance ? Math.round(leg.distance) : null;
+
+  let icon = "➡️";
+  let main = "";
+  let sub = "";
+
+  if (mode === "WALK") {
+    icon = "🚶";
+    main = `Walk to ${toName}`;
+    sub = [distanceM ? `${distanceM}m` : null, durationMin ? `${durationMin} min` : null]
+      .filter(Boolean)
+      .join(" · ");
+  } else if (mode === "BUS") {
+    icon = "🚌";
+    main = `Bus ${routeName} — ${fromName} to ${toName}`;
+    sub = durationMin ? `${durationMin} min` : "";
+  } else if (mode === "SUBWAY" || mode === "RAIL" || mode === "TRAM") {
+    icon = "🚇";
+    main = `${routeName || "Train"} — ${fromName} to ${toName}`;
+    sub = durationMin ? `${durationMin} min` : "";
+  } else {
+    main = `${mode || "Travel"} — ${fromName} to ${toName}`;
+    sub = durationMin ? `${durationMin} min` : "";
+  }
+
+  return `
+    <div class="leg-row">
+      <div class="leg-icon">${icon}</div>
+      <div class="leg-desc">
+        <div class="leg-main">${main}</div>
+        <div class="leg-sub">${sub}</div>
+      </div>
+    </div>`;
+}
+
+function decodeLegGeometry(leg) {
+  const encoded = leg?.legGeometry?.points;
+  if (!encoded) return [];
+  try {
+    return decodePolyline(encoded);
+  } catch (e) {
+    return [];
+  }
+}
+
+// Standard Google encoded-polyline decoder, precision 5 (OpenTripPlanner default)
+function decodePolyline(encoded) {
+  let index = 0, lat = 0, lng = 0;
+  const coordinates = [];
+  const len = encoded.length;
+
+  while (index < len) {
+    let b, shift = 0, result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = result & 1 ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = result & 1 ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+
+    coordinates.push([lat / 1e5, lng / 1e5]);
+  }
+  return coordinates;
+}
+
+/* ===================== NEARBY SCREEN (from earlier build) ===================== */
+const NUM_NEAREST = 8;
+const STOPS_CACHE_KEY = "busstops_cache_v1";
+const STOPS_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 14;
+
+let allStops = [];
+
+const statusEl = document.getElementById("status");
+const listEl = document.getElementById("stopList");
+document.getElementById("refreshBtn").addEventListener("click", initNearby);
+
+async function initNearby() {
+  statusEl.textContent = "Getting your location...";
+  listEl.innerHTML = "";
+  try {
+    const pos = await getLocation();
+    const userLat = pos.coords.latitude;
+    const userLng = pos.coords.longitude;
+
+    statusEl.textContent = "Loading bus stops...";
+    allStops = await getBusStops();
+
+    const nearest = findNearest(userLat, userLng, allStops, NUM_NEAREST);
+    renderStops(nearest);
+    statusEl.textContent = `${nearest.length} nearest stops`;
+  } catch (err) {
+    statusEl.textContent = "Error: " + err.message;
+  }
+}
+
+async function getBusStops() {
+  const cached = localStorage.getItem(STOPS_CACHE_KEY);
+  if (cached) {
+    const parsed = JSON.parse(cached);
+    if (Date.now() - parsed.timestamp < STOPS_CACHE_MAX_AGE_MS) return parsed.stops;
+  }
+  const res = await fetch(`${WORKER_URL}/busstops`);
+  if (!res.ok) throw new Error("Could not load bus stops");
+  const data = await res.json();
+  localStorage.setItem(STOPS_CACHE_KEY, JSON.stringify({ timestamp: Date.now(), stops: data.stops }));
+  return data.stops;
+}
+
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function findNearest(lat, lng, stops, n) {
+  return stops.map((s) => ({ ...s, dist: distanceMeters(lat, lng, s.lat, s.lng) }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, n);
+}
+
+function renderStops(stops) {
+  listEl.innerHTML = "";
+  stops.forEach((stop) => {
+    const card = document.createElement("div");
+    card.className = "stop-card";
+    card.innerHTML = `
+      <div class="stop-top">
+        <div class="stop-name">${stop.name}</div>
+        <div class="stop-dist">${Math.round(stop.dist)} m</div>
+      </div>
+      <div class="stop-code">Stop ${stop.code} · ${stop.road}</div>
+      <div class="arrivals" id="arr-${stop.code}"><div class="spinner">Tap to load arrivals</div></div>
+    `;
+    card.addEventListener("click", () => toggleArrivals(stop.code));
+    listEl.appendChild(card);
+  });
+}
+
+async function toggleArrivals(stopCode) {
+  const el = document.getElementById(`arr-${stopCode}`);
+  if (el.classList.contains("open")) {
+    el.classList.remove("open");
+    return;
+  }
+  el.classList.add("open");
+  el.innerHTML = `<div class="spinner">Loading...</div>`;
+  try {
+    const res = await fetch(`${WORKER_URL}/arrivals?stop=${stopCode}`);
+    const data = await res.json();
+    if (!data.services || data.services.length === 0) {
+      el.innerHTML = `<div class="spinner">No services / no data</div>`;
+      return;
+    }
+    el.innerHTML = data.services
+      .map((svc) => {
+        const etaText = svc.etas.length
+          ? svc.etas.map((e) => (e.minutes <= 0 ? "Arr" : `${e.minutes}m`)).join(" / ")
+          : "No data";
+        const warnClass = svc.etas[0] && svc.etas[0].minutes <= 2 ? "warn" : "";
+        return `<div class="service-row"><span class="service-no">Bus ${svc.serviceNo}</span><span class="eta ${warnClass}">${etaText}</span></div>`;
+      })
+      .join("");
+  } catch (err) {
+    el.innerHTML = `<div class="spinner">Error loading arrivals</div>`;
+  }
+}
+
+/* ===================== PWA SERVICE WORKER ===================== */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+</script>
+
+</body>
+</html>
