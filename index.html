@@ -335,6 +335,16 @@
   }
   .fav-bus-row .service-no { font-weight: 600; font-size: 14px; }
   .fav-bus-row .chevron { color: var(--muted); }
+
+  .retry-btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+  }
 </style>
 </head>
 <body>
@@ -1087,6 +1097,21 @@ async function openRouteModal(serviceNo, highlightStopCode) {
     const res = await fetch(`${WORKER_URL}/busroute?service=${encodeURIComponent(serviceNo)}`);
     const data = await res.json();
 
+    if (data.building) {
+      routeModalBody.innerHTML = `
+        <div class="spinner">
+          Building the bus route cache for the first time — this can take a few taps as it works through the full dataset.<br><br>
+          <button id="retryRouteFetch" class="retry-btn">Try again</button>
+        </div>`;
+      document.getElementById("retryRouteFetch").addEventListener("click", () => {
+        openRouteModal(serviceNo, highlightStopCode);
+      });
+      return;
+    }
+    if (data.error) {
+      routeModalBody.innerHTML = `<div class="spinner">Error: ${data.error}</div>`;
+      return;
+    }
     if (!data.stops || data.stops.length === 0) {
       routeModalBody.innerHTML = `<div class="spinner">No route data found for this service</div>`;
       return;
