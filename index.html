@@ -276,11 +276,13 @@
   }
   .route-stop-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 12px;
     padding: 10px 0;
     border-bottom: 1px solid #1c2029;
+    cursor: pointer;
   }
+  .route-stop-row:active { opacity: 0.7; }
   .route-stop-row.highlighted { background: #16233d; margin: 0 -16px; padding: 10px 16px; border-radius: 8px; }
   .route-stop-seq {
     width: 24px;
@@ -293,8 +295,11 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    margin-top: 2px;
   }
   .route-stop-row.highlighted .route-stop-seq { background: var(--accent); color: white; }
+  .route-stop-main { flex: 1; min-width: 0; }
+  .route-stop-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .route-stop-name { font-size: 14px; font-weight: 600; }
   .route-stop-code { font-size: 11px; color: var(--muted); }
 
@@ -427,7 +432,7 @@
 
 <script>
 // ---- CONFIG: paste your deployed Cloudflare Worker URL here ----
-const WORKER_URL = "https://busapp-proxy.marcuschang10.workers.dev";
+const WORKER_URL = "https://busapp-proxy.marcuschang10.workers.dev/";
 // ------------------------------------------------------------------
 
 /* ===================== TAB SWITCHING ===================== */
@@ -1144,22 +1149,39 @@ function renderRouteStops(direction, stopLookup, highlightStopCode) {
     .filter((s) => s.direction === direction)
     .sort((a, b) => a.seq - b.seq);
 
-  routeModalBody.innerHTML = stopsForDirection
-    .map((s) => {
-      const stopInfo = stopLookup[s.stopCode];
-      const name = stopInfo ? stopInfo.name : s.stopCode;
-      const road = stopInfo ? stopInfo.road : "";
-      const highlighted = s.stopCode === highlightStopCode ? "highlighted" : "";
-      return `
-        <div class="route-stop-row ${highlighted}">
-          <div class="route-stop-seq">${s.seq}</div>
-          <div>
-            <div class="route-stop-name">${name}</div>
-            <div class="route-stop-code">Stop ${s.stopCode}${road ? " · " + road : ""}</div>
-          </div>
-        </div>`;
-    })
-    .join("");
+  routeModalBody.innerHTML = "";
+
+  stopsForDirection.forEach((s) => {
+    const stopInfo = stopLookup[s.stopCode];
+    const name = stopInfo ? stopInfo.name : s.stopCode;
+    const road = stopInfo ? stopInfo.road : "";
+    const highlighted = s.stopCode === highlightStopCode ? "highlighted" : "";
+    const favActive = isFavStop(s.stopCode) ? "active" : "";
+
+    const row = document.createElement("div");
+    row.className = `route-stop-row ${highlighted}`;
+    row.innerHTML = `
+      <div class="route-stop-seq">${s.seq}</div>
+      <div class="route-stop-main">
+        <div class="route-stop-top">
+          <div class="route-stop-name">${name}</div>
+          <button class="star-btn ${favActive}">★</button>
+        </div>
+        <div class="route-stop-code">Stop ${s.stopCode}${road ? " · " + road : ""}</div>
+        <div class="arrivals"><div class="spinner">Tap to load arrivals</div></div>
+      </div>`;
+
+    row.addEventListener("click", () => toggleArrivals(s.stopCode, row));
+
+    row.querySelector(".star-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const favStop = { code: s.stopCode, name, road };
+      const nowFav = toggleFavStop(favStop);
+      e.currentTarget.classList.toggle("active", nowFav);
+    });
+
+    routeModalBody.appendChild(row);
+  });
 }
 
 /* ===================== PWA SERVICE WORKER ===================== */
