@@ -108,6 +108,54 @@
   .suggestion-item .s-name { font-weight: 600; }
   .suggestion-item .s-addr { color: var(--muted); font-size: 12px; }
 
+  .mode-toggle {
+    display: flex;
+    background: var(--card);
+    border-radius: 10px;
+    padding: 3px;
+    gap: 3px;
+  }
+  .mode-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--muted);
+    padding: 8px 6px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 7px;
+  }
+  .mode-btn.active {
+    background: var(--accent);
+    color: white;
+  }
+  .route-tabs {
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px;
+    overflow-x: auto;
+    flex-shrink: 0;
+    display: none;
+  }
+  .route-tabs.visible { display: flex; }
+  .route-tab {
+    flex-shrink: 0;
+    background: var(--card);
+    border: 1px solid transparent;
+    color: var(--text);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 12px;
+    text-align: left;
+    min-width: 100px;
+  }
+  .route-tab.active {
+    border-color: var(--accent);
+    background: #16233d;
+  }
+  .route-tab .rt-time { font-weight: 700; font-size: 14px; }
+  .route-tab .rt-sub { color: var(--muted); font-size: 11px; }
+
   #goBtn {
     background: var(--accent);
     color: white;
@@ -182,9 +230,15 @@
       <input id="toInput" placeholder="Where to?" />
       <div class="suggestions" id="toSuggestions"></div>
     </div>
+    <div class="mode-toggle" id="modeToggle">
+      <button class="mode-btn active" data-mode="TRANSIT">All routes</button>
+      <button class="mode-btn" data-mode="BUS">Bus only</button>
+      <button class="mode-btn" data-mode="RAIL">MRT only</button>
+    </div>
     <button id="goBtn">Get Directions</button>
   </div>
   <div id="map"></div>
+  <div class="route-tabs" id="routeTabs"></div>
   <div id="itineraryPanel"></div>
 </div>
 
@@ -199,7 +253,7 @@
 
 <script>
 // ---- CONFIG: paste your deployed Cloudflare Worker URL here ----
-const WORKER_URL = "https://busapp-proxy.marcuschang10.workers.dev";
+const WORKER_URL = "https://YOUR-WORKER-NAME.YOUR-SUBDOMAIN.workers.dev";
 // ------------------------------------------------------------------
 
 /* ===================== TAB SWITCHING ===================== */
@@ -239,6 +293,20 @@ function getLocation() {
 let map, routeLayer, markerLayer;
 let fromCoords = null; // {lat, lng, name} — null means "use current location"
 let toCoords = null;
+let currentMode = "TRANSIT"; // TRANSIT | BUS | RAIL
+let currentItineraries = [];
+let currentStart = null;
+let currentEnd = null;
+
+document.querySelectorAll(".mode-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".mode-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentMode = btn.dataset.mode;
+    // If a route is already showing, re-fetch immediately with the new mode
+    if (currentStart && currentEnd) getDirections();
+  });
+});
 
 function initMap() {
   if (map) return;
@@ -311,7 +379,10 @@ document.getElementById("goBtn").addEventListener("click", getDirections);
 
 async function getDirections() {
   const itinPanel = document.getElementById("itineraryPanel");
+  const routeTabs = document.getElementById("routeTabs");
   itinPanel.innerHTML = `<div class="spinner">Finding route...</div>`;
+  routeTabs.classList.remove("visible");
+  routeTabs.innerHTML = "";
 
   try {
     let start = fromCoords;
@@ -325,11 +396,15 @@ async function getDirections() {
       return;
     }
 
+    currentStart = start;
+    currentEnd = toCoords;
+
     const params = new URLSearchParams({
       startLat: start.lat,
       startLng: start.lng,
       endLat: toCoords.lat,
       endLng: toCoords.lng,
+      mode: currentMode,
     });
 
     const res = await fetch(`${WORKER_URL}/route?${params.toString()}`);
@@ -337,14 +412,48 @@ async function getDirections() {
 
     const itineraries = data?.plan?.itineraries || [];
     if (itineraries.length === 0) {
-      itinPanel.innerHTML = `<div class="spinner">No route found. Try a different start/destination.</div>`;
+      itinPanel.innerHTML = `<div class="spinner">No route found for this mode. Try "All routes" or a different start/destination.</div>`;
       return;
     }
 
+    currentItineraries = itineraries;
+    renderRouteTabs(itineraries);
     renderItinerary(itineraries[0], start, toCoords);
   } catch (err) {
     itinPanel.innerHTML = `<div class="spinner">Error: ${err.message}</div>`;
   }
+}
+
+function renderRouteTabs(itineraries) {
+  const routeTabs = document.getElementById("routeTabs");
+
+  if (itineraries.length <= 1) {
+    routeTabs.classList.remove("visible");
+    routeTabs.innerHTML = "";
+    return;
+  }
+
+  routeTabs.classList.add("visible");
+  routeTabs.innerHTML = itineraries
+    .map((itin, i) => {
+      const mins = Math.round(itin.duration / 60);
+      const transfers = itin.transfers !== undefined ? itin.transfers : "?";
+      return `
+        <button class="route-tab ${i === 0 ? "active" : ""}" data-idx="${i}">
+          <div class="rt-time">${mins} min</div>
+          <div class="rt-sub">${transfers} transfer(s)</div>
+        </button>`;
+    })
+    .join("");
+
+  routeTabs.querySelectorAll(".route-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      routeTabs.querySelectorAll(".route-tab").forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      const idx = Number(tab.dataset.idx);
+      renderItinerary(currentItineraries[idx], currentStart, currentEnd);
+    });
+  });
 }
 
 function renderItinerary(itin, start, end) {
