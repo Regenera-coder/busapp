@@ -1198,7 +1198,18 @@ function renderRouteStops(direction, stopLookup, highlightStopCode) {
 /* ===================== PWA SERVICE WORKER ===================== */
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    navigator.serviceWorker.register("sw.js").then((reg) => {
+      reg.update(); // proactively check for a newer sw.js every time the app opens
+      reg.addEventListener("updatefound", () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener("statechange", () => {
+          if (newWorker.state === "activated") {
+            window.location.reload();
+          }
+        });
+      });
+    }).catch(() => {});
   });
 }
 
