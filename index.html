@@ -85,6 +85,17 @@
     font-size: 14px;
     outline: none;
   }
+  .locate-btn {
+    background: none;
+    border: none;
+    font-size: 16px;
+    padding: 6px;
+    flex-shrink: 0;
+    opacity: 0.85;
+  }
+  .locate-btn:active { opacity: 0.5; }
+  .locate-btn.loading { animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
   .suggestions {
     position: absolute;
     top: 100%;
@@ -223,6 +234,7 @@
     <div class="input-row">
       <span class="dot">🟢</span>
       <input id="fromInput" placeholder="Current location" />
+      <button class="locate-btn" id="useCurrentLocBtn" title="Use current location">📍</button>
       <div class="suggestions" id="fromSuggestions"></div>
     </div>
     <div class="input-row">
@@ -373,6 +385,31 @@ setupSearchInput(document.getElementById("fromInput"), document.getElementById("
 });
 setupSearchInput(document.getElementById("toInput"), document.getElementById("toSuggestions"), (r) => {
   toCoords = r;
+});
+
+document.getElementById("useCurrentLocBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("useCurrentLocBtn");
+  const fromInput = document.getElementById("fromInput");
+  btn.classList.add("loading");
+  try {
+    const pos = await getLocation();
+    fromCoords = {
+      lat: pos.coords.latitude,
+      lng: pos.coords.longitude,
+      name: "Current location",
+    };
+    fromInput.value = "Current location";
+    document.getElementById("fromSuggestions").classList.remove("open");
+
+    // Center the map on the user so it's visible immediately, even before a route is requested
+    map.setView([fromCoords.lat, fromCoords.lng], 15);
+    markerLayer.clearLayers();
+    L.marker([fromCoords.lat, fromCoords.lng]).addTo(markerLayer).bindPopup("You are here").openPopup();
+  } catch (err) {
+    alert("Couldn't get your location: " + err.message);
+  } finally {
+    btn.classList.remove("loading");
+  }
 });
 
 document.getElementById("goBtn").addEventListener("click", getDirections);
