@@ -36,6 +36,16 @@
     flex-shrink: 0;
   }
   header h1 { font-size: 18px; margin: 0; }
+  .install-btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .install-btn.hidden { display: none; }
   nav.tabs {
     display: flex;
     border-bottom: 1px solid #222530;
@@ -356,16 +366,17 @@
 
 <header>
   <h1>🚌 My Bus</h1>
+  <button id="installBtn" class="install-btn hidden">Install App</button>
 </header>
 
 <nav class="tabs">
-  <button id="tabDirBtn" class="active">Directions</button>
-  <button id="tabNearBtn">Nearby</button>
+  <button id="tabNearBtn" class="active">Nearby</button>
+  <button id="tabDirBtn">Directions</button>
   <button id="tabFavBtn">★ Favourites</button>
 </nav>
 
 <!-- DIRECTIONS SCREEN -->
-<div id="screenDirections" class="screen active">
+<div id="screenDirections" class="screen">
   <div class="search-panel">
     <div class="input-row">
       <span class="dot">🟢</span>
@@ -391,7 +402,7 @@
 </div>
 
 <!-- NEARBY SCREEN -->
-<div id="screenNearby" class="screen">
+<div id="screenNearby" class="screen active">
   <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 16px 0;">
     <div id="status">Getting your location...</div>
     <button id="refreshBtn">Refresh</button>
@@ -1188,6 +1199,45 @@ function renderRouteStops(direction, stopLookup, highlightStopCode) {
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+
+// Nearby is now the default screen on load, so kick off its data fetch immediately
+initNearby();
+
+/* ===================== INSTALL PROMPT ===================== */
+let deferredInstallPrompt = null;
+const installBtn = document.getElementById("installBtn");
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  // Chrome/Edge/Android fire this when the app meets install criteria
+  // (valid manifest, service worker, served over https). Stop the browser's
+  // default mini-infobar and show our own button instead.
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  installBtn.classList.remove("hidden");
+});
+
+installBtn.addEventListener("click", async () => {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  installBtn.classList.add("hidden");
+});
+
+window.addEventListener("appinstalled", () => {
+  installBtn.classList.add("hidden");
+});
+
+// iOS Safari has no beforeinstallprompt API — detect it and show manual instructions instead
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isInStandaloneMode = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+if (isIOS && !isInStandaloneMode) {
+  installBtn.textContent = "Install";
+  installBtn.classList.remove("hidden");
+  installBtn.addEventListener("click", () => {
+    alert("To install: tap the Share icon in Safari, then \"Add to Home Screen\".");
   });
 }
 </script>
