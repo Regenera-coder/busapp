@@ -116,6 +116,9 @@
     margin-top: 4px;
     max-height: 220px;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     z-index: 20;
     display: none;
     box-shadow: 0 8px 24px rgba(0,0,0,0.4);
@@ -186,7 +189,18 @@
     font-size: 14px;
     font-weight: 600;
   }
+  .toggle-map-btn {
+    background: var(--card);
+    color: var(--text);
+    border: none;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    flex-shrink: 0;
+  }
   #map { flex: 1; min-height: 200px; background: #1a1d24; }
+  #map.collapsed { display: none; flex: 0; min-height: 0; }
   #itineraryPanel {
     max-height: 40%;
     overflow-y: auto;
@@ -396,7 +410,8 @@
     </div>
     <button id="goBtn">Get Directions</button>
   </div>
-  <div id="map"></div>
+  <button id="toggleMapBtn" class="toggle-map-btn">🗺️ Show map</button>
+  <div id="map" class="collapsed"></div>
   <div class="route-tabs" id="routeTabs"></div>
   <div id="itineraryPanel"></div>
 </div>
@@ -572,6 +587,8 @@ let currentMode = "TRANSIT"; // TRANSIT | BUS | RAIL
 let currentItineraries = [];
 let currentStart = null;
 let currentEnd = null;
+let mapVisible = false;
+let lastRouteBounds = null; // stored so the map can re-fit correctly once revealed
 
 document.querySelectorAll(".mode-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -594,6 +611,27 @@ function initMap() {
   markerLayer = L.layerGroup().addTo(map);
 }
 initMap();
+
+const toggleMapBtn = document.getElementById("toggleMapBtn");
+const mapEl = document.getElementById("map");
+
+toggleMapBtn.addEventListener("click", () => {
+  mapVisible = !mapVisible;
+  mapEl.classList.toggle("collapsed", !mapVisible);
+  toggleMapBtn.textContent = mapVisible ? "🗺️ Hide map" : "🗺️ Show map";
+
+  if (mapVisible) {
+    // Leaflet renders incorrectly if sized while hidden — fix it up now that
+    // the container has real dimensions again, then re-apply the last route's
+    // bounds if one was loaded while the map was collapsed.
+    setTimeout(() => {
+      map.invalidateSize();
+      if (lastRouteBounds) {
+        map.fitBounds(L.latLngBounds(lastRouteBounds), { padding: [30, 30] });
+      }
+    }, 50);
+  }
+});
 
 function setupSearchInput(inputEl, suggestionsEl, onPick) {
   let debounceTimer;
@@ -798,7 +836,10 @@ function renderItinerary(itin, start, end) {
   });
 
   if (allPoints.length > 0) {
-    map.fitBounds(L.latLngBounds(allPoints), { padding: [30, 30] });
+    lastRouteBounds = allPoints;
+    if (mapVisible) {
+      map.fitBounds(L.latLngBounds(allPoints), { padding: [30, 30] });
+    }
   }
 }
 
