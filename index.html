@@ -185,6 +185,13 @@
     border-top: 1px solid #222530;
   }
   .itin-summary { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+  .compare-link {
+    display: inline-block;
+    color: var(--accent);
+    font-size: 12px;
+    text-decoration: none;
+    margin-bottom: 8px;
+  }
   .leg-row {
     display: flex;
     gap: 10px;
@@ -505,12 +512,17 @@ function renderItinerary(itin, start, end) {
   if (walkMeters) summaryText += ` · ${walkMeters}m walking`;
   if (itin.transfers !== undefined) summaryText += ` · ${itin.transfers} transfer(s)`;
 
+  const fromLabel = document.getElementById("fromInput").value.trim() || "Current location";
+  const toLabel = document.getElementById("toInput").value.trim();
+  const gothereUrl = `https://gothere.sg/maps#q:${encodeURIComponent(fromLabel + " to " + toLabel)}`;
+  const compareLink = `<a href="${gothereUrl}" target="_blank" rel="noopener" class="compare-link">Compare on gothere.sg ↗</a>`;
+
   const legs = itin.legs || [];
   const legsHtml = legs
     .map((leg) => describeLeg(leg))
     .join("");
 
-  itinPanel.innerHTML = `<div class="itin-summary">${summaryText}</div>${legsHtml}`;
+  itinPanel.innerHTML = `<div class="itin-summary">${summaryText}</div>${compareLink}${legsHtml}`;
 
   // Draw markers
   L.marker([start.lat, start.lng]).addTo(markerLayer).bindPopup("Start");
