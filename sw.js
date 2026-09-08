@@ -1,4 +1,4 @@
-const CACHE_NAME = "mybus-shell-v1";
+const CACHE_NAME = "mybus-shell-v2";
 const SHELL_FILES = ["./index.html", "./manifest.json"];
 
 self.addEventListener("install", (event) => {
@@ -17,15 +17,25 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Cache-first for the app shell only. Live data (bus stops/arrivals) always
-// goes to the network so timings are never stale.
+// Network-first for the app shell: always try to fetch the latest index.html/
+// manifest.json when online (so updates you push actually reach installed
+// users), and only fall back to the cached copy if the network is unavailable
+// (offline use). This trades a tiny bit of load latency for never getting
+// stuck on a stale version -- the previous cache-first approach silently froze
+// installed users on whatever shell was cached at install time.
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   const isShellFile = SHELL_FILES.some((f) => url.pathname.endsWith(f.replace("./", "")));
 
   if (isShellFile) {
     event.respondWith(
-      caches.match(event.request).then((cached) => cached || fetch(event.request))
+      fetch(event.request)
+        .then((networkResponse) => {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return networkResponse;
+        })
+        .catch(() => caches.match(event.request))
     );
   }
 });
