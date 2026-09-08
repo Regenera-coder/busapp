@@ -265,7 +265,7 @@
 
 <script>
 // ---- CONFIG: paste your deployed Cloudflare Worker URL here ----
-const WORKER_URL = "https://busapp-proxy.marcuschang10.workers.dev";
+const WORKER_URL = "https://YOUR-WORKER-NAME.YOUR-SUBDOMAIN.workers.dev";
 // ------------------------------------------------------------------
 
 /* ===================== TAB SWITCHING ===================== */
@@ -453,9 +453,9 @@ async function getDirections() {
       return;
     }
 
-    currentItineraries = itineraries;
-    renderRouteTabs(itineraries);
-    renderItinerary(itineraries[0], start, toCoords);
+    currentItineraries = [...itineraries].sort((a, b) => a.duration - b.duration);
+    renderRouteTabs(currentItineraries);
+    renderItinerary(currentItineraries[0], start, toCoords);
   } catch (err) {
     itinPanel.innerHTML = `<div class="spinner">Error: ${err.message}</div>`;
   }
