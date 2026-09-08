@@ -244,6 +244,7 @@
     flex-shrink: 0;
   }
   .route-modal-header #routeModalTitle { font-size: 16px; font-weight: 700; }
+  .route-modal-title-row { display: flex; align-items: center; gap: 10px; }
   .route-modal-header button {
     background: var(--card);
     border: none;
@@ -296,6 +297,44 @@
   .route-stop-row.highlighted .route-stop-seq { background: var(--accent); color: white; }
   .route-stop-name { font-size: 14px; font-weight: 600; }
   .route-stop-code { font-size: 11px; color: var(--muted); }
+
+  .star-btn {
+    background: none;
+    border: none;
+    color: #4a4f5a;
+    font-size: 18px;
+    padding: 2px 4px;
+    flex-shrink: 0;
+  }
+  .star-btn.active { color: #f5c518; }
+
+  .stop-top-right { display: flex; align-items: center; gap: 10px; }
+
+  .fav-section-title {
+    padding: 16px 16px 6px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .fav-list {
+    padding: 0 16px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .fav-bus-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--card);
+    border-radius: 10px;
+    padding: 12px 14px;
+    cursor: pointer;
+  }
+  .fav-bus-row .service-no { font-weight: 600; font-size: 14px; }
+  .fav-bus-row .chevron { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -307,6 +346,7 @@
 <nav class="tabs">
   <button id="tabDirBtn" class="active">Directions</button>
   <button id="tabNearBtn">Nearby</button>
+  <button id="tabFavBtn">★ Favourites</button>
 </nav>
 
 <!-- DIRECTIONS SCREEN -->
@@ -342,6 +382,10 @@
     <button id="refreshBtn">Refresh</button>
   </div>
   <div class="search-panel" style="padding-top:8px;">
+    <div class="mode-toggle" id="stopSearchModeToggle">
+      <button class="mode-btn active" data-mode="stop">Search stops</button>
+      <button class="mode-btn" data-mode="bus">Search bus number</button>
+    </div>
     <div class="input-row">
       <span class="dot">🔍</span>
       <input id="stopSearchInput" placeholder="Search by stop number or name" />
@@ -350,10 +394,21 @@
   <div id="stopList"></div>
 </div>
 
+<!-- FAVOURITES SCREEN -->
+<div id="screenFavourites" class="screen">
+  <div class="fav-section-title">Favourite Stops</div>
+  <div id="favStopsList" class="fav-list"></div>
+  <div class="fav-section-title">Favourite Buses</div>
+  <div id="favBusesList" class="fav-list"></div>
+</div>
+
 <!-- BUS ROUTE DETAIL MODAL -->
 <div id="routeModal" class="route-modal hidden">
   <div class="route-modal-header">
-    <div id="routeModalTitle">Bus Route</div>
+    <div class="route-modal-title-row">
+      <div id="routeModalTitle">Bus Route</div>
+      <button id="routeModalFavBtn" class="star-btn" title="Favourite this bus">★</button>
+    </div>
     <button id="closeRouteModal">✕</button>
   </div>
   <div class="route-modal-tabs" id="routeModalTabs"></div>
@@ -368,20 +423,105 @@ const WORKER_URL = "https://busapp-proxy.marcuschang10.workers.dev";
 /* ===================== TAB SWITCHING ===================== */
 const tabDirBtn = document.getElementById("tabDirBtn");
 const tabNearBtn = document.getElementById("tabNearBtn");
+const tabFavBtn = document.getElementById("tabFavBtn");
 const screenDirections = document.getElementById("screenDirections");
 const screenNearby = document.getElementById("screenNearby");
+const screenFavourites = document.getElementById("screenFavourites");
 
 tabDirBtn.addEventListener("click", () => switchTab("directions"));
 tabNearBtn.addEventListener("click", () => switchTab("nearby"));
+tabFavBtn.addEventListener("click", () => switchTab("favourites"));
 
 function switchTab(tab) {
-  const isDir = tab === "directions";
-  tabDirBtn.classList.toggle("active", isDir);
-  tabNearBtn.classList.toggle("active", !isDir);
-  screenDirections.classList.toggle("active", isDir);
-  screenNearby.classList.toggle("active", !isDir);
-  if (isDir) setTimeout(() => map && map.invalidateSize(), 100);
-  if (!isDir && allStops.length === 0) initNearby();
+  tabDirBtn.classList.toggle("active", tab === "directions");
+  tabNearBtn.classList.toggle("active", tab === "nearby");
+  tabFavBtn.classList.toggle("active", tab === "favourites");
+  screenDirections.classList.toggle("active", tab === "directions");
+  screenNearby.classList.toggle("active", tab === "nearby");
+  screenFavourites.classList.toggle("active", tab === "favourites");
+  if (tab === "directions") setTimeout(() => map && map.invalidateSize(), 100);
+  if (tab === "nearby" && allStops.length === 0) initNearby();
+  if (tab === "favourites") renderFavouritesScreen();
+}
+
+/* ===================== FAVOURITES (localStorage) ===================== */
+const FAV_STOPS_KEY = "fav_stops_v1";
+const FAV_BUSES_KEY = "fav_buses_v1";
+
+function getFavStops() {
+  try { return JSON.parse(localStorage.getItem(FAV_STOPS_KEY) || "[]"); } catch { return []; }
+}
+function saveFavStops(list) { localStorage.setItem(FAV_STOPS_KEY, JSON.stringify(list)); }
+function isFavStop(code) { return getFavStops().some((s) => s.code === code); }
+function toggleFavStop(stop) {
+  const list = getFavStops();
+  const idx = list.findIndex((s) => s.code === stop.code);
+  if (idx >= 0) list.splice(idx, 1);
+  else list.push({ code: stop.code, name: stop.name, road: stop.road });
+  saveFavStops(list);
+  return idx < 0; // true if now favourited
+}
+
+function getFavBuses() {
+  try { return JSON.parse(localStorage.getItem(FAV_BUSES_KEY) || "[]"); } catch { return []; }
+}
+function saveFavBuses(list) { localStorage.setItem(FAV_BUSES_KEY, JSON.stringify(list)); }
+function isFavBus(serviceNo) { return getFavBuses().includes(serviceNo); }
+function toggleFavBus(serviceNo) {
+  let list = getFavBuses();
+  if (list.includes(serviceNo)) {
+    list = list.filter((s) => s !== serviceNo);
+    saveFavBuses(list);
+    return false;
+  }
+  list.push(serviceNo);
+  saveFavBuses(list);
+  return true;
+}
+
+function renderFavouritesScreen() {
+  const favStops = getFavStops();
+  const favBuses = getFavBuses();
+  const favStopsList = document.getElementById("favStopsList");
+  const favBusesList = document.getElementById("favBusesList");
+
+  if (favStops.length === 0) {
+    favStopsList.innerHTML = `<div class="spinner">No favourite stops yet — tap the ★ on any stop.</div>`;
+  } else {
+    favStopsList.innerHTML = "";
+    favStops.forEach((stop) => {
+      const card = document.createElement("div");
+      card.className = "stop-card";
+      card.innerHTML = `
+        <div class="stop-top">
+          <div class="stop-name">${stop.name}</div>
+          <button class="star-btn active">★</button>
+        </div>
+        <div class="stop-code">Stop ${stop.code} · ${stop.road}</div>
+        <div class="arrivals"><div class="spinner">Tap to load arrivals</div></div>
+      `;
+      card.addEventListener("click", () => toggleArrivals(stop.code, card));
+      card.querySelector(".star-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleFavStop(stop);
+        renderFavouritesScreen();
+      });
+      favStopsList.appendChild(card);
+    });
+  }
+
+  if (favBuses.length === 0) {
+    favBusesList.innerHTML = `<div class="spinner">No favourite buses yet — star a bus from its route view.</div>`;
+  } else {
+    favBusesList.innerHTML = "";
+    favBuses.forEach((serviceNo) => {
+      const row = document.createElement("div");
+      row.className = "fav-bus-row";
+      row.innerHTML = `<span class="service-no">Bus ${serviceNo}</span><span class="chevron">›</span>`;
+      row.addEventListener("click", () => openRouteModal(serviceNo, null));
+      favBusesList.appendChild(row);
+    });
+  }
 }
 
 /* ===================== SHARED LOCATION HELPER ===================== */
@@ -602,10 +742,11 @@ function renderItinerary(itin, start, end) {
   if (walkMeters) summaryText += ` · ${walkMeters}m walking`;
   if (itin.transfers !== undefined) summaryText += ` · ${itin.transfers} transfer(s)`;
 
-  const fromLabel = document.getElementById("fromInput").value.trim() || "Current location";
-  const toLabel = document.getElementById("toInput").value.trim();
-  const gothereUrl = `https://gothere.sg/maps#q:${encodeURIComponent(fromLabel + " to " + toLabel)}`;
-  const compareLink = `<a href="${gothereUrl}" target="_blank" rel="noopener" class="compare-link">Compare on gothere.sg ↗</a>`;
+  const gmapsUrl =
+    `https://www.google.com/maps/dir/?api=1` +
+    `&origin=${start.lat},${start.lng}&destination=${end.lat},${end.lng}` +
+    `&travelmode=transit`;
+  const compareLink = `<a href="${gmapsUrl}" target="_blank" rel="noopener" class="compare-link">Compare on Google Maps ↗</a>`;
 
   const legs = itin.legs || [];
   const legsHtml = legs
@@ -729,10 +870,41 @@ const listEl = document.getElementById("stopList");
 document.getElementById("refreshBtn").addEventListener("click", initNearby);
 
 let searchDebounce;
+let stopSearchMode = "stop"; // "stop" | "bus"
 const stopSearchInput = document.getElementById("stopSearchInput");
+
+document.querySelectorAll("#stopSearchModeToggle .mode-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#stopSearchModeToggle .mode-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    stopSearchMode = btn.dataset.mode;
+    stopSearchInput.value = "";
+    if (stopSearchMode === "bus") {
+      stopSearchInput.placeholder = "e.g. 168 — press Enter";
+      listEl.innerHTML = "";
+      statusEl.textContent = "Type a bus number and press Enter";
+    } else {
+      stopSearchInput.placeholder = "Search by stop number or name";
+      initNearby();
+    }
+  });
+});
+
 stopSearchInput.addEventListener("input", () => {
+  if (stopSearchMode !== "stop") return; // bus-number mode waits for Enter, not live-filter
   clearTimeout(searchDebounce);
   searchDebounce = setTimeout(runStopSearch, 250);
+});
+
+stopSearchInput.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (stopSearchMode === "bus") {
+    const serviceNo = stopSearchInput.value.trim().toUpperCase();
+    if (serviceNo) openRouteModal(serviceNo, null);
+  } else {
+    clearTimeout(searchDebounce);
+    runStopSearch();
+  }
 });
 
 async function runStopSearch() {
@@ -823,21 +995,30 @@ function renderStops(stops, opts = {}) {
     const card = document.createElement("div");
     card.className = "stop-card";
     const distHtml = showDistance ? `<div class="stop-dist">${Math.round(stop.dist)} m</div>` : "";
+    const favActive = isFavStop(stop.code) ? "active" : "";
     card.innerHTML = `
       <div class="stop-top">
         <div class="stop-name">${stop.name}</div>
-        ${distHtml}
+        <div class="stop-top-right">
+          ${distHtml}
+          <button class="star-btn ${favActive}">★</button>
+        </div>
       </div>
       <div class="stop-code">Stop ${stop.code} · ${stop.road}</div>
-      <div class="arrivals" id="arr-${stop.code}"><div class="spinner">Tap to load arrivals</div></div>
+      <div class="arrivals"><div class="spinner">Tap to load arrivals</div></div>
     `;
-    card.addEventListener("click", () => toggleArrivals(stop.code));
+    card.addEventListener("click", () => toggleArrivals(stop.code, card));
+    card.querySelector(".star-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const nowFav = toggleFavStop(stop);
+      e.currentTarget.classList.toggle("active", nowFav);
+    });
     listEl.appendChild(card);
   });
 }
 
-async function toggleArrivals(stopCode) {
-  const el = document.getElementById(`arr-${stopCode}`);
+async function toggleArrivals(stopCode, card) {
+  const el = card.querySelector(".arrivals");
   if (el.classList.contains("open")) {
     el.classList.remove("open");
     return;
@@ -887,6 +1068,13 @@ async function openRouteModal(serviceNo, highlightStopCode) {
   routeModalTitle.textContent = `Bus ${serviceNo}`;
   routeModalTabs.innerHTML = "";
   routeModalBody.innerHTML = `<div class="spinner">Loading route...</div>`;
+
+  const favBtn = document.getElementById("routeModalFavBtn");
+  favBtn.classList.toggle("active", isFavBus(serviceNo));
+  favBtn.onclick = () => {
+    const nowFav = toggleFavBus(serviceNo);
+    favBtn.classList.toggle("active", nowFav);
+  };
 
   try {
     // Bus stop names/roads come from the already-cached full stop list — load it if needed
