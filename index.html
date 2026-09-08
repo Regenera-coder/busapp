@@ -222,6 +222,80 @@
     background: var(--accent); color: white; border: none;
     border-radius: 8px; padding: 8px 14px; font-size: 14px;
   }
+  .service-row { cursor: pointer; }
+  .service-row:active { opacity: 0.6; }
+
+  /* --- Bus route detail modal --- */
+  .route-modal {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+  }
+  .route-modal.hidden { display: none; }
+  .route-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 16px;
+    border-bottom: 1px solid #222530;
+    flex-shrink: 0;
+  }
+  .route-modal-header #routeModalTitle { font-size: 16px; font-weight: 700; }
+  .route-modal-header button {
+    background: var(--card);
+    border: none;
+    color: var(--text);
+    border-radius: 8px;
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+  }
+  .route-modal-tabs {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px;
+    flex-shrink: 0;
+  }
+  .route-modal-tabs button {
+    background: var(--card);
+    border: 1px solid transparent;
+    color: var(--text);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  .route-modal-tabs button.active { border-color: var(--accent); background: #16233d; }
+  .route-modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 16px 20px;
+  }
+  .route-stop-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid #1c2029;
+  }
+  .route-stop-row.highlighted { background: #16233d; margin: 0 -16px; padding: 10px 16px; border-radius: 8px; }
+  .route-stop-seq {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--card);
+    color: var(--muted);
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .route-stop-row.highlighted .route-stop-seq { background: var(--accent); color: white; }
+  .route-stop-name { font-size: 14px; font-weight: 600; }
+  .route-stop-code { font-size: 11px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -267,7 +341,23 @@
     <div id="status">Getting your location...</div>
     <button id="refreshBtn">Refresh</button>
   </div>
+  <div class="search-panel" style="padding-top:8px;">
+    <div class="input-row">
+      <span class="dot">🔍</span>
+      <input id="stopSearchInput" placeholder="Search by stop number or name" />
+    </div>
+  </div>
   <div id="stopList"></div>
+</div>
+
+<!-- BUS ROUTE DETAIL MODAL -->
+<div id="routeModal" class="route-modal hidden">
+  <div class="route-modal-header">
+    <div id="routeModalTitle">Bus Route</div>
+    <button id="closeRouteModal">✕</button>
+  </div>
+  <div class="route-modal-tabs" id="routeModalTabs"></div>
+  <div class="route-modal-body" id="routeModalBody"></div>
 </div>
 
 <script>
@@ -638,6 +728,47 @@ const statusEl = document.getElementById("status");
 const listEl = document.getElementById("stopList");
 document.getElementById("refreshBtn").addEventListener("click", initNearby);
 
+let searchDebounce;
+const stopSearchInput = document.getElementById("stopSearchInput");
+stopSearchInput.addEventListener("input", () => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(runStopSearch, 250);
+});
+
+async function runStopSearch() {
+  const query = stopSearchInput.value.trim().toLowerCase();
+
+  if (query === "") {
+    // Empty search box — fall back to nearby-stops behavior
+    if (allStops.length === 0) {
+      initNearby();
+    } else {
+      statusEl.textContent = "Nearby stops";
+      // Re-run nearest calc using last known position isn't cached, so just prompt refresh
+      initNearby();
+    }
+    return;
+  }
+
+  // Ensure the full stop list is loaded before filtering (works even if Nearby tab was never opened)
+  if (allStops.length === 0) {
+    statusEl.textContent = "Loading bus stops...";
+    try {
+      allStops = await getBusStops();
+    } catch (err) {
+      statusEl.textContent = "Error: " + err.message;
+      return;
+    }
+  }
+
+  const matches = allStops
+    .filter((s) => s.code.toLowerCase().startsWith(query) || s.name.toLowerCase().includes(query))
+    .slice(0, 25);
+
+  statusEl.textContent = `${matches.length} result(s) for "${stopSearchInput.value.trim()}"`;
+  renderStops(matches, { showDistance: false });
+}
+
 async function initNearby() {
   statusEl.textContent = "Getting your location...";
   listEl.innerHTML = "";
@@ -685,15 +816,17 @@ function findNearest(lat, lng, stops, n) {
     .slice(0, n);
 }
 
-function renderStops(stops) {
+function renderStops(stops, opts = {}) {
+  const showDistance = opts.showDistance !== false;
   listEl.innerHTML = "";
   stops.forEach((stop) => {
     const card = document.createElement("div");
     card.className = "stop-card";
+    const distHtml = showDistance ? `<div class="stop-dist">${Math.round(stop.dist)} m</div>` : "";
     card.innerHTML = `
       <div class="stop-top">
         <div class="stop-name">${stop.name}</div>
-        <div class="stop-dist">${Math.round(stop.dist)} m</div>
+        ${distHtml}
       </div>
       <div class="stop-code">Stop ${stop.code} · ${stop.road}</div>
       <div class="arrivals" id="arr-${stop.code}"><div class="spinner">Tap to load arrivals</div></div>
@@ -724,12 +857,96 @@ async function toggleArrivals(stopCode) {
           ? svc.etas.map((e) => (e.minutes <= 0 ? "Arr" : `${e.minutes}m`)).join(" / ")
           : "No data";
         const warnClass = svc.etas[0] && svc.etas[0].minutes <= 2 ? "warn" : "";
-        return `<div class="service-row"><span class="service-no">Bus ${svc.serviceNo}</span><span class="eta ${warnClass}">${etaText}</span></div>`;
+        return `<div class="service-row" data-service="${svc.serviceNo}" data-stop="${stopCode}"><span class="service-no">Bus ${svc.serviceNo}</span><span class="eta ${warnClass}">${etaText}</span></div>`;
       })
       .join("");
+    el.querySelectorAll(".service-row").forEach((row) => {
+      row.addEventListener("click", (e) => {
+        e.stopPropagation(); // don't also toggle the arrivals panel closed
+        openRouteModal(row.dataset.service, row.dataset.stop);
+      });
+    });
   } catch (err) {
     el.innerHTML = `<div class="spinner">Error loading arrivals</div>`;
   }
+}
+
+/* ===================== BUS ROUTE DETAIL MODAL ===================== */
+let currentRouteStops = []; // all direction rows for the currently open service
+const routeModal = document.getElementById("routeModal");
+const routeModalTitle = document.getElementById("routeModalTitle");
+const routeModalTabs = document.getElementById("routeModalTabs");
+const routeModalBody = document.getElementById("routeModalBody");
+
+document.getElementById("closeRouteModal").addEventListener("click", () => {
+  routeModal.classList.add("hidden");
+});
+
+async function openRouteModal(serviceNo, highlightStopCode) {
+  routeModal.classList.remove("hidden");
+  routeModalTitle.textContent = `Bus ${serviceNo}`;
+  routeModalTabs.innerHTML = "";
+  routeModalBody.innerHTML = `<div class="spinner">Loading route...</div>`;
+
+  try {
+    // Bus stop names/roads come from the already-cached full stop list — load it if needed
+    if (allStops.length === 0) {
+      allStops = await getBusStops();
+    }
+    const stopLookup = {};
+    allStops.forEach((s) => (stopLookup[s.code] = s));
+
+    const res = await fetch(`${WORKER_URL}/busroute?service=${encodeURIComponent(serviceNo)}`);
+    const data = await res.json();
+
+    if (!data.stops || data.stops.length === 0) {
+      routeModalBody.innerHTML = `<div class="spinner">No route data found for this service</div>`;
+      return;
+    }
+
+    currentRouteStops = data.stops;
+    const directions = [...new Set(currentRouteStops.map((s) => s.direction))].sort();
+
+    if (directions.length > 1) {
+      routeModalTabs.innerHTML = directions
+        .map((d, i) => `<button class="${i === 0 ? "active" : ""}" data-dir="${d}">Direction ${d}</button>`)
+        .join("");
+      routeModalTabs.querySelectorAll("button").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          routeModalTabs.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          renderRouteStops(Number(btn.dataset.dir), stopLookup, highlightStopCode);
+        });
+      });
+    }
+
+    renderRouteStops(directions[0], stopLookup, highlightStopCode);
+  } catch (err) {
+    routeModalBody.innerHTML = `<div class="spinner">Error: ${err.message}</div>`;
+  }
+}
+
+function renderRouteStops(direction, stopLookup, highlightStopCode) {
+  const stopsForDirection = currentRouteStops
+    .filter((s) => s.direction === direction)
+    .sort((a, b) => a.seq - b.seq);
+
+  routeModalBody.innerHTML = stopsForDirection
+    .map((s) => {
+      const stopInfo = stopLookup[s.stopCode];
+      const name = stopInfo ? stopInfo.name : s.stopCode;
+      const road = stopInfo ? stopInfo.road : "";
+      const highlighted = s.stopCode === highlightStopCode ? "highlighted" : "";
+      return `
+        <div class="route-stop-row ${highlighted}">
+          <div class="route-stop-seq">${s.seq}</div>
+          <div>
+            <div class="route-stop-name">${name}</div>
+            <div class="route-stop-code">Stop ${s.stopCode}${road ? " · " + road : ""}</div>
+          </div>
+        </div>`;
+    })
+    .join("");
 }
 
 /* ===================== PWA SERVICE WORKER ===================== */
